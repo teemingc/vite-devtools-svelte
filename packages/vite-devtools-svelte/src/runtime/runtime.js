@@ -1,3 +1,6 @@
+// The devtools runtime: the store hooks.js feeds from Svelte's devtools
+// events. Browser code, served from disk next to hooks.js.
+
 // FNV-1a over UTF-16 code units: cheap change detection for large snapshots.
 function __hash(str) {
   let h = 0x811c9dc5
@@ -66,14 +69,30 @@ function __clampInt(v, lo, hi, d) {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d
 }
 
-if (typeof window !== 'undefined' && !window.__SVELTE_DEVTOOLS__) {
-  const __NO_VALUE = Symbol('no value')
-  // State timeline ring: every read sees at most 500 entries and
-  // __TIMELINE_BYTES (also the server's buffer budget). The raw array may
-  // hold up to __TIMELINE_TRIM_AT (2 x the 500 cap) between bulk trims.
-  const __TIMELINE_BYTES = 4 * 1024 * 1024
-  const __TIMELINE_TRIM_AT = 1000
-  const __SVELTE_DT = {
+const __NO_VALUE = Symbol('no value')
+// State timeline ring: every read sees at most 500 entries and
+// __TIMELINE_BYTES (also the server's buffer budget). The raw array may
+// hold up to __TIMELINE_TRIM_AT (2 x the 500 cap) between bulk trims.
+const __TIMELINE_BYTES = 4 * 1024 * 1024
+const __TIMELINE_TRIM_AT = 1000
+
+/**
+ * The devtools store of a page: component registry, reactive graph, state
+ * timeline, activity summary, render profiles and FPS. `env` holds the
+ * browser globals it uses (`window` in the browser; fakes in tests).
+ */
+export function createStore(env) {
+  const {
+    window,
+    document,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    requestAnimationFrame,
+    performance,
+  } = env
+  const store = {
     _nextId: 0,
     _instances: new Map(),
     _stack: [],
@@ -183,7 +202,7 @@ if (typeof window !== 'undefined' && !window.__SVELTE_DEVTOOLS__) {
     // componentOf, children, snapshot, and sourceNode (the node a $state
     // proxy's property / version signal belongs to, or null).
     _api: null,
-    // the HMR channel (import.meta.hot of the first copy that has one)
+    // the HMR channel (connectHot, by the first hooks.js copy that has one)
     _hot: null,
 
     // `parentHint`: the parent component's id (hooks.js reads it from the
@@ -1468,7 +1487,7 @@ if (typeof window !== 'undefined' && !window.__SVELTE_DEVTOOLS__) {
     },
 
     _isVisible() {
-      if (typeof document === 'undefined') return true
+      if (document === undefined) return true
       return document.visibilityState !== 'hidden'
     },
 
@@ -1533,17 +1552,15 @@ if (typeof window !== 'undefined' && !window.__SVELTE_DEVTOOLS__) {
     },
   }
 
-  window.__SVELTE_DEVTOOLS__ = __SVELTE_DT
-
   // FPS sampling starts on the server's subscription message and pauses
   // while the app tab is hidden.
-  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-    document.addEventListener('visibilitychange', () => __SVELTE_DT._syncSampling())
+  if (document !== undefined && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => store._syncSampling())
   }
 
   // Runtime errors
   window.addEventListener('error', event => {
-    __SVELTE_DT._send('svelte-devtools:runtime-error', {
+    store._send('svelte-devtools:runtime-error', {
       message: event.message,
       file: event.filename,
       line: event.lineno,
@@ -1556,46 +1573,42 @@ if (typeof window !== 'undefined' && !window.__SVELTE_DEVTOOLS__) {
     const reason = event.reason
     const message = reason?.message
     const stack = reason?.stack
-    __SVELTE_DT._send('svelte-devtools:runtime-error', {
+    store._send('svelte-devtools:runtime-error', {
       // No (or an empty / non-string) message: the stringified reason.
       message: typeof message === 'string' && message !== '' ? message : __describe(reason),
       stack: typeof stack === 'string' ? stack : '',
       timestamp: Date.now(),
     })
   })
+
+  return store
 }
 
-// The HMR channel to the dev server. A second copy of this file (one a
-// dependency prebundle carries along with hooks.js) may have installed the
-// runtime first without one: the first copy that has a channel attaches it.
-if (typeof window !== 'undefined' && import.meta.hot) {
-  const dt = window.__SVELTE_DEVTOOLS__
-  if (dt?._hot === null) {
-    const hot = import.meta.hot
-    dt._hot = hot
-    // Pull requests from the server are answered regardless of the
-    // subscription state.
-    hot.on('svelte-devtools:subscription', data => {
-      dt._setSubscription(data)
-    })
-    hot.on('vite:ws:connect', () => {
-      // The server may have restarted with an empty collector: the reply to
-      // runtime-ready is treated as a fresh activation (full snapshot).
-      dt._resync = true
-      hot.send('svelte-devtools:runtime-ready', {})
-    })
+/** Attaches the HMR channel to the dev server (`import.meta.hot`) to a store. */
+export function connectHot(dt, hot) {
+  dt._hot = hot
+  // Pull requests from the server are answered regardless of the
+  // subscription state.
+  hot.on('svelte-devtools:subscription', data => {
+    dt._setSubscription(data)
+  })
+  hot.on('vite:ws:connect', () => {
+    // The server may have restarted with an empty collector: the reply to
+    // runtime-ready is treated as a fresh activation (full snapshot).
+    dt._resync = true
     hot.send('svelte-devtools:runtime-ready', {})
-    hot.on('svelte-devtools:request-reactive-graph', data => {
-      dt.sendReactiveGraph(data)
-    })
-    hot.on('svelte-devtools:request-reactive-summary', data => {
-      dt.sendReactiveSummary(data)
-    })
-    hot.on('svelte-devtools:request-state-timeline', () => {
-      hot.send('svelte-devtools:state-timeline', dt._timelineFull())
-    })
-    hot.on('svelte-devtools:clear-state-timeline', () => {
-      dt.clearStateTimeline()
-    })
-  }
+  })
+  hot.send('svelte-devtools:runtime-ready', {})
+  hot.on('svelte-devtools:request-reactive-graph', data => {
+    dt.sendReactiveGraph(data)
+  })
+  hot.on('svelte-devtools:request-reactive-summary', data => {
+    dt.sendReactiveSummary(data)
+  })
+  hot.on('svelte-devtools:request-state-timeline', () => {
+    hot.send('svelte-devtools:state-timeline', dt._timelineFull())
+  })
+  hot.on('svelte-devtools:clear-state-timeline', () => {
+    dt.clearStateTimeline()
+  })
 }

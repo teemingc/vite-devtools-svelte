@@ -89,7 +89,6 @@ const REQUIRED_TOOLS = [
 ]
 // Same markers as perf/check-prod-noop.mjs (kept in sync by hand).
 const PROD_MARKERS = [
-  '__SVELTE_DEVTOOLS__',
   'svelte-devtools:',
   'virtual:svelte-devtools',
   '__svelte_devtools_record_load',
@@ -1104,8 +1103,8 @@ async function main() {
   })
 }
 
-// Page-side probe (serialized by waitForFunction): a DevTools runtime global exists.
-const hasRuntime = () => Object.keys(window).some(k => /^__SVELTE_.*DEVTOOLS__$/.test(k))
+// Page-side probe (serialized by waitForFunction): the DevTools store exists.
+const hasRuntime = () => Symbol.for('vite-devtools-svelte') in window
 
 // T2 browser + the app's first view. Runs BEFORE any authorized MCP call:
 // those take the collector's 60 s MCP lease (plugin.ts) and would activate
@@ -1143,9 +1142,7 @@ async function openApp(getSrv) {
     if (f === page.mainFrame()) navigations++
   })
   const runtimeActive = () =>
-    page.evaluate(
-      () => window[Object.keys(window).find(k => /^__SVELTE_.*DEVTOOLS__$/.test(k))]?._active,
-    )
+    page.evaluate(() => window[Symbol.for('vite-devtools-svelte')]?._active)
   const app = {
     browser,
     ctx,

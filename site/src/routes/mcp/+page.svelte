@@ -443,8 +443,7 @@ and what changed when I edited the tax rate.`
           <div>
             <dt>No components or reactive nodes</dt>
             <dd>
-              Check that <code>componentTracking</code> is not set to <code>false</code> and that
-              the plugin comes before <code>sveltekit()</code> in
+              Check that the plugin comes before <code>sveltekit()</code> in
               <code>vite.config.ts</code>.
             </dd>
           </div>

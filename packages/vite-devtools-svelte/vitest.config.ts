@@ -15,13 +15,10 @@ export default defineConfig({
         'src/types.ts',
         'src/index.ts',
         'src/env.d.ts',
-        // Browser sources served as text (`?raw`, or read from disk by the
-        // reactivity harness) and evaluated under a virtual module id or
-        // `new Function`: V8 cannot attribute that execution to these files,
-        // so they would always read ~0%. Their behaviour is covered by
-        // test/perf (runtime in a fake browser) and test/reactivity (real
-        // Svelte components through the hooks).
-        'src/runtime/client.js',
+        // Browser sources, outside the Node floors below: their behaviour is
+        // covered by test/perf (the runtime in a fake browser) and
+        // test/reactivity (real Svelte components through the hooks).
+        'src/runtime/runtime.js',
         'src/runtime/hooks.js',
       ],
       reporter: ['text', 'json-summary'],

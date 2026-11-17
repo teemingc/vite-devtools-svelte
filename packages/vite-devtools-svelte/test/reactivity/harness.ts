@@ -18,7 +18,8 @@ export interface Graph {
   [k: string]: unknown
 }
 
-export const dt = (): any => (globalThis as any).__SVELTE_DEVTOOLS__
+// The page's store, under the registry key hooks.js creates it at.
+export const dt = (): any => (globalThis as any)[Symbol.for('vite-devtools-svelte')]
 
 // The tests run under a DOM environment, but the package type-checks against Node's
 // lib only: describe just the DOM surface the tests touch.

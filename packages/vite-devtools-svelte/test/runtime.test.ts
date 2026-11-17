@@ -1,51 +1,47 @@
 import fs from 'node:fs'
-import vm from 'node:vm'
+import path from 'node:path'
 
 import * as devtools from 'svelte/internal/devtools'
 import { describe, it, expect } from 'vitest'
 
-import {
-  HOOKS_FILE,
-  HOOKS_MODULE_ID,
-  RUNTIME_FILE,
-  RUNTIME_MODULE_ID,
-} from '../src/runtime/index.js'
+import { HOOKS_FILE, HOOKS_MODULE_ID } from '../src/runtime/index.js'
 
 // Behaviour of the runtime and the hooks is covered by test/perf (the
 // runtime in a fake browser) and test/reactivity (real Svelte components
 // through the hooks). This file pins the module contract the plugin serves.
 
 describe('module ids', () => {
-  it.each([
-    ['RUNTIME_MODULE_ID', RUNTIME_MODULE_ID, 'virtual:svelte-devtools-runtime'],
-    ['HOOKS_MODULE_ID', HOOKS_MODULE_ID, 'virtual:svelte-devtools-hooks'],
-  ])('%s', (_, actual, expected) => {
-    expect(actual).toBe(expected)
+  it('HOOKS_MODULE_ID', () => {
+    expect(HOOKS_MODULE_ID).toBe('virtual:svelte-devtools-hooks')
   })
 })
+
+const RUNTIME_FILE = path.join(path.dirname(HOOKS_FILE), 'runtime.js')
 
 describe('runtime file', () => {
-  it('is a self-contained script (no imports) that parses', () => {
-    // `import.meta` is only valid in modules; the runtime uses nothing else.
-    const script = fs.readFileSync(RUNTIME_FILE, 'utf8').replaceAll('import.meta.hot', 'undefined')
-    expect(script).not.toMatch(/^\s*(import|export)\b/m)
-    expect(() => new vm.Script(script)).not.toThrow()
+  it('imports nothing and exports only the store factory and the HMR wiring', async () => {
+    // the browser globals it uses come in through createStore(env)
+    const source = fs.readFileSync(RUNTIME_FILE, 'utf8')
+    expect(source).not.toMatch(/^\s*import\b/m)
+    const runtime = (await import(RUNTIME_FILE)) as Record<string, unknown>
+    expect(Object.keys(runtime).toSorted()).toEqual(['connectHot', 'createStore'])
   })
 })
 
-// The hooks are the only code that talks to Svelte: they must import the
-// runtime first, then only what svelte/internal/devtools exports.
+// The hooks are the only code that talks to Svelte: they import the runtime
+// next to them and only what svelte/internal/devtools exports.
 describe('hooks file', () => {
   const source = fs.readFileSync(HOOKS_FILE, 'utf8')
   const imports = [...source.matchAll(/^import\s+(?:\{([^}]*)\}\s+from\s+)?'([^']+)'/gm)]
 
-  it('imports the runtime next to it (a real file), then svelte/internal/devtools, and nothing else', () => {
+  it('imports svelte/internal/devtools and the runtime next to it (a real file), and nothing else', () => {
     // no virtual module: a dependency prebundle may carry the hooks
-    expect(imports.map(m => m[2])).toEqual(['./client.js', 'svelte/internal/devtools'])
+    expect(imports.map(m => m[2])).toEqual(['svelte/internal/devtools', './runtime.js'])
   })
 
   it('uses only names svelte/internal/devtools exports (as functions)', () => {
-    const names = imports[1]![1]!
+    const names = imports
+      .find(m => m[2] === 'svelte/internal/devtools')![1]!
       .split(',')
       .map(name => name.trim())
       .filter(name => name !== '')

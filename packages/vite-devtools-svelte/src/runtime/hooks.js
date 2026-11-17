@@ -1,12 +1,9 @@
-// Feeds the devtools runtime (`window.__SVELTE_DEVTOOLS__`) from Svelte's own
-// devtools instrumentation channel (`svelte/internal/devtools`, dev only).
-// Compiled components import this file before anything else (the compiler's
+// Feeds the devtools store (runtime.js) from Svelte's own devtools
+// instrumentation channel (`svelte/internal/devtools`, dev only). Compiled
+// components import this file before anything else (the compiler's
 // `experimental.devtools` option), so the listener is subscribed before the
-// first component, signal or effect exists. A dependency prebundle may carry
-// a second copy: the runtime installs once, and listening again under the
-// same name replaces the first subscription.
-// oxlint-disable-next-line import/no-unassigned-import -- installs the runtime first
-import './client.js'
+// first component, signal or effect exists.
+
 import {
   children,
   componentEffect,
@@ -26,6 +23,8 @@ import {
   snapshot,
 } from 'svelte/internal/devtools'
 
+import { connectHot, createStore } from './runtime.js'
+
 // Longest chain of nested $state proxies followed to find the root's node.
 const MAX_PROXY_DEPTH = 64
 
@@ -43,9 +42,25 @@ function isLibrary(file) {
 
 const isObject = value => typeof value === 'object' && value !== null
 
-const dt = typeof window === 'undefined' ? null : window.__SVELTE_DEVTOOLS__
+// A dependency prebundle may carry a second copy of this file and runtime.js,
+// but a page has one store: the first copy creates it under this registry key,
+// later copies reuse it (listening again under the same name replaces the
+// earlier subscription).
+const STORE_KEY = Symbol.for('vite-devtools-svelte')
+
+function pageStore() {
+  if (!Object.hasOwn(globalThis, STORE_KEY)) {
+    Object.defineProperty(globalThis, STORE_KEY, { value: createStore(window) })
+  }
+  return globalThis[STORE_KEY]
+}
+
+const dt = typeof window === 'undefined' ? null : pageStore()
 
 if (dt) {
+  // A prebundled copy may have no HMR channel: the first copy that has one attaches it.
+  if (import.meta.hot && dt._hot === null) connectHot(dt, import.meta.hot)
+
   // Component context -> component id (also on the runtime: the graph names
   // the component of any effect it reaches through it).
   const idByContext = dt._idByContext

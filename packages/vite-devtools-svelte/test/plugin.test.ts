@@ -4,12 +4,7 @@ import type { Plugin } from 'vite'
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 
 import { svelteDevtools } from '../src/plugin.js'
-import {
-  HOOKS_FILE,
-  HOOKS_MODULE_ID,
-  RUNTIME_FILE,
-  RUNTIME_MODULE_ID,
-} from '../src/runtime/index.js'
+import { HOOKS_FILE, HOOKS_MODULE_ID } from '../src/runtime/index.js'
 import { callHook, resolvePlugins } from './helpers.js'
 
 // =====================================================================
@@ -67,12 +62,9 @@ const resolveWith = (plugin: Plugin, id: string, importer?: string, ctx: object 
 }
 
 describe('mainPlugin module resolution', () => {
-  it.each([
-    [RUNTIME_MODULE_ID, RUNTIME_FILE, '/src/runtime/client.js'],
-    [HOOKS_MODULE_ID, HOOKS_FILE, '/src/runtime/hooks.js'],
-  ])('resolves the alias %s to the file on disk', async (id, file, suffix) => {
-    expect(await resolveWith(getMainPlugin(), id)).toBe(file)
-    expect(file.endsWith(suffix)).toBe(true)
+  it('resolves the hooks alias to the file on disk', async () => {
+    expect(await resolveWith(getMainPlugin(), HOOKS_MODULE_ID)).toBe(HOOKS_FILE)
+    expect(HOOKS_FILE.endsWith('/src/runtime/hooks.js')).toBe(true)
   })
 
   it("resolves Svelte imported by the hooks as the app's Svelte (from the project root)", async () => {
@@ -136,11 +128,8 @@ describe('experimental.devtools', () => {
     })
   })
 
-  it.each([
-    ['componentTracking is disabled', { componentTracking: false }, 'serve'],
-    ['building', {}, 'build'],
-  ])('is not added when %s', (_, options, command) => {
-    expect(withSvelte(options, {}, command).compilerOptions).toBeUndefined()
+  it('is not added when building', () => {
+    expect(withSvelte({}, {}, 'build').compilerOptions).toBeUndefined()
   })
 
   it('is not added inside Vitest', () => {
@@ -163,7 +152,6 @@ describe('build command: every hook is inert', () => {
   const main = byName('vite-devtools-svelte')
 
   it.each([
-    ['resolveId(runtime)', () => resolveWith(main, RUNTIME_MODULE_ID)],
     ['resolveId(hooks)', () => resolveWith(main, HOOKS_MODULE_ID)],
     [
       'tracking transform',
@@ -197,15 +185,8 @@ describe('build command: every hook is inert', () => {
 // =====================================================================
 
 describe('mainPlugin transformIndexHtml', () => {
-  it.each([
-    ['the hooks (and through them the runtime)', {}, HOOKS_MODULE_ID],
-    [
-      'only the runtime without component tracking',
-      { componentTracking: false },
-      RUNTIME_MODULE_ID,
-    ],
-  ])('injects %s in serve mode', (_, options, id) => {
-    const hook = getMainPlugin(options).transformIndexHtml as {
+  it('injects the hooks (and through them the runtime) in serve mode', () => {
+    const hook = getMainPlugin().transformIndexHtml as {
       order: string
       handler: () => any
     }
@@ -215,7 +196,7 @@ describe('mainPlugin transformIndexHtml', () => {
       {
         tag: 'script',
         attrs: { type: 'module' },
-        children: `import '${id}'`,
+        children: `import '${HOOKS_MODULE_ID}'`,
         injectTo: 'head-prepend',
       },
     ])

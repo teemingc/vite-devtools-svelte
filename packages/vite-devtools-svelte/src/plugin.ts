@@ -11,7 +11,7 @@ import { analyzeRoutes } from './analyzers/routes.js'
 import { createMcpMiddleware, MCP_PATH } from './mcp/http.js'
 import { buildMcpServer } from './mcp/server.js'
 import { SessionStore } from './mcp/sessions.js'
-import { HOOKS_FILE, HOOKS_MODULE_ID, RUNTIME_FILE, RUNTIME_MODULE_ID } from './runtime/index.js'
+import { HOOKS_FILE, HOOKS_MODULE_ID } from './runtime/index.js'
 import { injectModuleTracking, isSvelteModule } from './runtime/transform.js'
 import { Collector } from './server/collector.js'
 import { captureCompilerWarnings } from './server/compiler-warnings.js'
@@ -23,13 +23,6 @@ import { sveltekitTemplateInjector } from './server/template-injector.js'
 import type { LoadProfile } from './types.js'
 
 export interface SvelteDevtoolsOptions {
-  /**
-   * Track components, signals and effects through Svelte's devtools events
-   * (`svelte/internal/devtools`): the compiler imports the listener into
-   * every client component (`experimental.devtools`).
-   * @default true
-   */
-  componentTracking?: boolean
   /**
    * Require the one-time code before a browser can use the standalone
    * DevTools (`/.svelte-devtools/`). Set `false` to skip it on a trusted,
@@ -93,7 +86,7 @@ function collectModules(server: ViteDevServer): GraphModuleLike[] {
 }
 
 export function svelteDevtools(options: SvelteDevtoolsOptions = {}): Plugin[] {
-  const { componentTracking = true, clientAuth = true } = options
+  const { clientAuth = true } = options
 
   let config: ResolvedConfig
   let server: ViteDevServer | undefined
@@ -163,7 +156,7 @@ export function svelteDevtools(options: SvelteDevtoolsOptions = {}): Plugin[] {
       // Only while developing, and not inside Vitest (which runs `serve`).
       // vite-plugin-svelte resolved its options in its own `configResolved`
       // (order 'pre').
-      if (componentTracking && serving() && !process.env['VITEST']) addDevtoolsHooks(config.plugins)
+      if (serving() && !process.env['VITEST']) addDevtoolsHooks(config.plugins)
     },
 
     configureServer(devServer) {
@@ -239,11 +232,10 @@ export function svelteDevtools(options: SvelteDevtoolsOptions = {}): Plugin[] {
       await Promise.all(doomed.map(m => m.dispose()))
     },
 
-    // Module resolution: the aliases of the browser files, and Svelte as the
-    // hooks import it.
+    // Module resolution: the alias of the hooks file, and Svelte as the hooks
+    // import it.
     async resolveId(id, importer) {
       if (!serving()) return null
-      if (id === RUNTIME_MODULE_ID) return RUNTIME_FILE
       if (id === HOOKS_MODULE_ID) return HOOKS_FILE
       // The hooks must listen to the app's Svelte instance, not one installed
       // next to this package: resolve as if imported from the project root.
@@ -257,7 +249,7 @@ export function svelteDevtools(options: SvelteDevtoolsOptions = {}): Plugin[] {
     // 'pre': the tag is injected before Vite's own HTML processing, which
     // rewrites the inline module's bare `virtual:` import to a URL the browser
     // can load (as a normal-order hook, the browser requested
-    // 'virtual:svelte-devtools-runtime' itself and failed with a CORS error).
+    // 'virtual:svelte-devtools-hooks' itself and failed with a CORS error).
     transformIndexHtml: {
       order: 'pre',
       handler() {
@@ -266,7 +258,7 @@ export function svelteDevtools(options: SvelteDevtoolsOptions = {}): Plugin[] {
           {
             tag: 'script',
             attrs: { type: 'module' },
-            children: `import '${componentTracking ? HOOKS_MODULE_ID : RUNTIME_MODULE_ID}'`,
+            children: `import '${HOOKS_MODULE_ID}'`,
             injectTo: 'head-prepend',
           },
         ]
@@ -294,7 +286,7 @@ export function svelteDevtools(options: SvelteDevtoolsOptions = {}): Plugin[] {
     apply: 'serve',
 
     transform(code, id, transformOptions) {
-      if (!componentTracking || !serving()) return null
+      if (!serving()) return null
       if (id.includes('node_modules')) return null
       // Client modules only: the runtime is browser code, and a server
       // render has no devtools to report to.

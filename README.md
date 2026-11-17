@@ -213,8 +213,6 @@ Open your app, click the floating Vite DevTools handle and switch to the **Svelt
 
 ```ts
 svelteDevtools({
-  // Enable component lifecycle tracking (default: true)
-  componentTracking: true,
   // Require the one-time code for the standalone DevTools (default: true).
   // In the Vite DevTools dock use DevTools({ clientAuth: false }) instead.
   clientAuth: true,
@@ -232,7 +230,7 @@ The plugin is **development-only** — every sub-plugin is `apply: 'serve'`, so 
 
 ## Upgrading from 0.3.x
 
-The public API is unchanged — still `svelteDevtools({ componentTracking })`, and the same 15 panels. MCP keeps every existing tool and adds four reactivity tools (see [AI access](#ai-access-mcp)). What changed is how the UI is hosted and how it talks to the dev server:
+The public API is unchanged — still `svelteDevtools()`, and the same 15 panels. MCP keeps every existing tool and adds four reactivity tools (see [AI access](#ai-access-mcp)). What changed is how the UI is hosted and how it talks to the dev server:
 
 |           | 0.3.x                                                                                   | 0.4.0                                                                                                                |
 | --------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |

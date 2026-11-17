@@ -1,14 +1,17 @@
-// Shared harness for the runtime perf tests: evaluates the injected runtime
-// (runtimeCode) in an isolated fake browser and drives
-// `window.__SVELTE_DEVTOOLS__` like the hooks (src/runtime/hooks.js) do.
-import fs from 'node:fs'
-
-import { RUNTIME_FILE } from '../../src/runtime/index.js'
+// Shared harness for the runtime perf tests: creates a devtools store
+// (src/runtime/runtime.js) over an isolated fake browser and drives it like
+// the hooks (src/runtime/hooks.js) do.
 import { countVisits } from './visits.js'
 
 export { countVisits }
 
-const runtimeCode = fs.readFileSync(RUNTIME_FILE, 'utf8')
+interface RuntimeModule {
+  createStore: (env: Record<string, unknown>) => any
+  connectHot: (store: any, hot: unknown) => void
+}
+// A specifier in a variable: the runtime is untyped browser JavaScript.
+const RUNTIME_URL = new URL('../../src/runtime/runtime.js', import.meta.url).href
+const { createStore, connectHot } = (await import(RUNTIME_URL)) as RuntimeModule
 
 /**
  * The readers hooks.js gives the runtime (svelte/internal/devtools), over the
@@ -49,7 +52,7 @@ export interface Sent {
 
 export interface Harness {
   dt: any
-  /** the fake window the runtime was evaluated against */
+  /** the fake window the store was created with */
   window: Record<string, any>
   sent: Sent[]
   /** live intervals (cleared ones are removed) */
@@ -65,7 +68,7 @@ export interface Harness {
   document: { visibilityState: 'visible' | 'hidden'; dispatch: () => void }
 }
 
-// Evaluate runtimeCode in an isolated fake browser. Timers are captured (not
+// Create a store over an isolated fake browser. Timers are captured (not
 // scheduled) so tests control exactly when debounced/periodic work runs.
 // `clock` replaces performance.now() inside the runtime (time-based logic).
 // `active` (default true) delivers the §6.3 subscription message after boot,
@@ -112,30 +115,13 @@ export function createRuntime(
       for (const cb of visibilityListeners) cb()
     },
   }
-  const code = runtimeCode.replaceAll('import.meta.hot', '__hot')
-  // Evaluates the injected runtime's own source with stubbed browser globals.
-  // oxlint-disable-next-line typescript/no-implied-eval -- running the runtime source under test is the point
-  const fn = new Function(
-    'window',
-    'document',
-    '__hot',
-    'setTimeout',
-    'clearTimeout',
-    'setInterval',
-    'clearInterval',
-    'requestAnimationFrame',
-    'performance',
-    'WeakRef',
-    code,
-  )
   const timerIds = new Map<number, () => void>()
   const timerDelays = new Map<number, number>()
   let nextId = 1
-  fn(
+  const dt = createStore({
     window,
     document,
-    hot,
-    (cb: () => void, ms = 0) => {
+    setTimeout: (cb: () => void, ms = 0) => {
       const id = nextId++
       timerIds.set(id, cb)
       timerDelays.set(id, ms)
@@ -148,27 +134,27 @@ export function createRuntime(
       })
       return id
     },
-    (id: number) => {
+    clearTimeout: (id: number) => {
       timerIds.delete(id)
       timerDelays.delete(id)
     },
-    (cb: () => void, ms: number) => {
+    setInterval: (cb: () => void, ms: number) => {
       const id = nextId++
       intervals.push({ fn: cb, ms, id })
       return id
     },
-    (id: number) => {
+    clearInterval: (id: number) => {
       const i = intervals.findIndex(x => x.id === id)
       if (i !== -1) intervals.splice(i, 1)
     },
-    () => {
+    requestAnimationFrame: () => {
       rafCallbacks++
       return 0
     },
-    opts.clock ? { now: opts.clock } : performance,
-    WeakRef,
-  )
-  window.__SVELTE_DEVTOOLS__._api = fieldApi
+    performance: opts.clock ? { now: opts.clock } : performance,
+  })
+  connectHot(dt, hot)
+  dt._api = fieldApi
   const emit = (event: string, data?: unknown) => {
     for (const cb of handlers.get(event) ?? []) cb(data)
   }
@@ -180,7 +166,7 @@ export function createRuntime(
   }
   return {
     dispatchWindow,
-    dt: window.__SVELTE_DEVTOOLS__,
+    dt,
     window,
     sent,
     intervals,

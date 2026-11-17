@@ -21,7 +21,6 @@ const viteBin = path.join(repo, 'playground/node_modules/vite/bin/vite.js')
 
 // Strings that only exist in code emitted by vite-devtools-svelte.
 const MARKERS = [
-  '__SVELTE_DEVTOOLS__',
   'svelte-devtools:',
   'virtual:svelte-devtools',
   '__svelte_devtools_record_load',

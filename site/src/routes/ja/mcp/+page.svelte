@@ -351,7 +351,6 @@ ReactivePriceChart のインスタンスを見て、grandTotal に影響しう�
             <div>
               <dt>コンポーネントやリアクティブノードが出てこない</dt>
               <dd>
-                <code>componentTracking</code> が <code>false</code> になっていないこと、
                 <code>vite.config.ts</code> でプラグインが <code>sveltekit()</code>
                 より前にあることを確認してください。
               </dd>

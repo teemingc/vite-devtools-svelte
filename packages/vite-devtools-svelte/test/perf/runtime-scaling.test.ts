@@ -1,5 +1,5 @@
 // Scaling and memory-bound tests for the browser runtime injected into the
-// user's app. They drive `window.__SVELTE_DEVTOOLS__` the same way the
+// user's app. They drive the devtools store the same way the
 // hooks do (register → registered → trackState →
 // unmount) with huge-app sized inputs.
 //

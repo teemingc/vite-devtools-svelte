@@ -293,7 +293,7 @@ describe('Collector component deltas + per-epoch state (§6.5)', () => {
     expect(c.liveComponents).toHaveLength(n - 1)
   })
 
-  it('componentTracking: false (no component snapshots ever): profiles of the newest pusher are served', () => {
+  it('no component snapshots ever: profiles of the newest pusher are served', () => {
     const c = new Collector()
     c.ingestProfiles({ epoch: 'tab1', profiles: [{ componentId: 1 }] })
     c.ingestStateTimeline({ epoch: 'tab1', changes: [change(1)] })

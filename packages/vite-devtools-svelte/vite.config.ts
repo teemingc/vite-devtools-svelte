@@ -9,7 +9,7 @@ export default defineConfig({
       // Served from disk next to the bundle (see src/runtime/index.ts)
       name: 'emit-browser-files',
       generateBundle() {
-        for (const fileName of ['hooks.js', 'client.js']) {
+        for (const fileName of ['hooks.js', 'runtime.js']) {
           this.emitFile({
             type: 'asset',
             fileName,
