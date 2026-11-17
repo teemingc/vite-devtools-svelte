@@ -87,7 +87,7 @@ async function devMarkers() {
         })
       }
     }
-    // The wrapper/runtime are pulled in by compiled components on the client.
+    // The hooks/runtime are imported by compiled components on the client.
     const comp = await fetch(`${base}/src/lib/components/gen/C0000.svelte`).then(r => r.text())
     const found = MARKERS.filter(m => html.includes(m) || comp.includes(m))
     return found

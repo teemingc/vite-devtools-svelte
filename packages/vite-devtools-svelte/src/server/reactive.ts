@@ -54,7 +54,7 @@ export function emptySummary(
   return {
     epoch,
     window: { ms: windowMs, since: 0, until: 0, sampledActiveMs: 0 },
-    policy: 'sampled-200ms',
+    policy: 'per-flush',
     coverage: 'component-init',
     components: { total: null, withActivity: 0 },
     rows: [],
@@ -175,7 +175,7 @@ export function normalizeSummary(data: Payload | undefined, epoch: string | null
       until: nonNegInt(w?.until),
       sampledActiveMs: nonNegInt(w?.sampledActiveMs),
     },
-    policy: 'sampled-200ms',
+    policy: 'per-flush',
     coverage: 'component-init',
     components: {
       total: typeof components?.total === 'number' ? components.total : null,

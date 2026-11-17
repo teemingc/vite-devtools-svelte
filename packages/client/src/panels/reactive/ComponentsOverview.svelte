@@ -137,14 +137,14 @@
       <div>
         <dt>Window</dt>
         <dd>
-          last {Math.round(s.window.ms / 1000)} s · sampled while active for {Math.round(
+          last {Math.round(s.window.ms / 1000)} s · recorded while active for {Math.round(
             s.window.sampledActiveMs / 1000,
           )} s
         </dd>
       </div>
       <div>
         <dt>Changes</dt>
-        <dd>$state sampled every 200 ms; several writes within one sample count once</dd>
+        <dd>$state changes per Svelte flush; several writes in one flush count once</dd>
       </div>
       <div>
         <dt>Coverage</dt>
@@ -210,7 +210,7 @@
             {/if}
             <span
               class="end num"
-              title="at least this many changes in the window (sampled every 200 ms); not a rate"
+              title="changes in the window (one per state per flush); not a rate"
               >≥ {r.changes.toLocaleString()}</span
             >
             <span class="end num">{r.renders.toLocaleString()}</span>

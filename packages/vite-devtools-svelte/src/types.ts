@@ -186,7 +186,7 @@ export interface ReactiveSummaryRow {
   kind?: 'module'
   /** Tracked nodes registered for this instance, by type. */
   nodes: { state: number; derived: number; effect: number }
-  /** Sampled state changes in the window (≤ 1 per node per 200 ms tick); not a rate. */
+  /** State changes in the window (≤ 1 per node per Svelte flush); not a rate. */
   changes: number
   /** Renders in the window. */
   renders: number
@@ -200,7 +200,7 @@ export interface ReactiveSummaryRow {
 export interface ReactiveSummary {
   epoch: string | null
   window: { ms: number; since: number; until: number; sampledActiveMs: number }
-  policy: 'sampled-200ms'
+  policy: 'per-flush'
   /**
    * Tracked: signals created during a component's init (and its later block
    * updates / effect runs) and while a `.svelte.js`/`.ts` module body runs
@@ -246,7 +246,7 @@ export interface CaptureInfo {
   /** Items reported before any cap; `null` = unknown. */
   total: number | null
   truncated: boolean
-  /** How the subset is chosen, e.g. 'tail', 'roots-first', 'sampled-200ms'. */
+  /** How the subset is chosen, e.g. 'tail', 'roots-first', 'per-flush'. */
   policy?: string
   dropped?: Array<{ reason: DropReason; count: number }>
   /** State values too large to snapshot (shown as a size summary). */

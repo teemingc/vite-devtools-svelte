@@ -1,7 +1,7 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig } from 'vitest/config'
 
-import { reactivityHarnessPlugin } from './test/reactivity/plugin.js'
+import { HOOKS_FILE, reactivityHarnessPlugin } from './test/reactivity/plugin.js'
 
 export default defineConfig({
   test: {
@@ -20,9 +20,9 @@ export default defineConfig({
         // `new Function`: V8 cannot attribute that execution to these files,
         // so they would always read ~0%. Their behaviour is covered by
         // test/perf (runtime in a fake browser) and test/reactivity (real
-        // Svelte components through the wrapper).
+        // Svelte components through the hooks).
         'src/runtime/client.js',
-        'src/runtime/wrapper.js',
+        'src/runtime/hooks.js',
       ],
       reporter: ['text', 'json-summary'],
       // Floors at the level reached (Oct 2026), so coverage cannot silently
@@ -58,13 +58,16 @@ export default defineConfig({
         },
       },
       {
-        // Real Svelte components (dev compile) through the production wrapper
+        // Real Svelte components (dev compile) through the production hooks
         // and runtime, in a DOM: the reactivity mechanism end to end.
         // Harness first, as svelteDevtools() is listed before sveltekit():
         // .svelte.ts modules are then compiled after the tracking transform.
         plugins: [
           reactivityHarnessPlugin(),
-          svelte({ compilerOptions: { dev: true }, configFile: false }),
+          svelte({
+            compilerOptions: { dev: true, experimental: { devtools: [HOOKS_FILE] } },
+            configFile: false,
+          }),
         ],
         resolve: { conditions: ['browser'] },
         test: {

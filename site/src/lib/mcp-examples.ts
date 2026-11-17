@@ -29,7 +29,7 @@ export const MCP_EXAMPLES: McpExample[] = [
         until: 1791119196841,
         sampledActiveMs: 5000,
       },
-      policy: 'sampled-200ms',
+      policy: 'per-flush',
       coverage: 'component-init',
       components: {
         total: 5,
@@ -298,7 +298,7 @@ export const MCP_EXAMPLES: McpExample[] = [
         captured: 5,
         total: null,
         truncated: false,
-        policy: 'sampled-200ms',
+        policy: 'per-flush',
         baseline: {
           complete: true,
           pendingNodes: 0,

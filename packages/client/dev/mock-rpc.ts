@@ -549,7 +549,7 @@ export function createMockBackend(scale = 5000) {
       return {
         epoch: MOCK_EPOCH,
         window: { ms: windowMs, since: until - windowMs, until, sampledActiveMs: windowMs },
-        policy: 'sampled-200ms',
+        policy: 'per-flush',
         coverage: 'component-init',
         components: { total: all.length, withActivity: active.length },
         rows,

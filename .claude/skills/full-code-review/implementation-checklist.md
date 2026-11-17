@@ -139,18 +139,15 @@ transform(code, id) {
 仮想モジュール（`virtual:svelte-devtools/runtime` 等）を resolveId で intercept する場合、importer が `node_modules` 配下や Vite の internal モジュール（`\0` プレフィックス）からの import である時は intercept しない。これを忘れると `node_modules` 内のコードが書き換わって壊れる：
 
 ```ts
-resolveId(id, importer) {
-  if (
-    config?.command === 'serve' &&
-    componentTracking &&
-    id === 'svelte/internal/client' &&
-    importer &&
-    !importer.includes('node_modules') &&
-    !importer.startsWith('\0')
-  ) {
-    return WRAPPER_MODULE_ID
+async resolveId(id, importer) {
+  if (!serving()) return null
+  if (id === RUNTIME_MODULE_ID) return RESOLVED_RUNTIME_ID
+  if (id === HOOKS_MODULE_ID) return HOOKS_FILE
+  // hooks.js はアプリ側の Svelte インスタンスを listen する
+  if (importer === HOOKS_FILE && id.startsWith('svelte/')) {
+    return this.resolve(id, path.join(root, 'index.html'), { skipSelf: true })
   }
-  return undefined
+  return null
 }
 ```
 
@@ -506,7 +503,7 @@ if (fpsSamples.length > 1200) fpsSamples = fpsSamples.slice(-1200)
 【dev only】
 ✅ 新規プラグインフックに config.command === 'serve' のガードがあるか？
 ✅ resolveId の intercept が node_modules / \0 を除外しているか？
-✅ production バンドルに runtime / wrapper が混入しないか？
+✅ production バンドルに runtime / hooks が混入しないか？
 
 【HMR / RPC】
 ✅ 新規 server.hot.send に対応する on ハンドラがあるか（逆も同様）？

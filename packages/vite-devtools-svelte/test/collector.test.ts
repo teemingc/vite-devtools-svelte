@@ -778,7 +778,7 @@ describe('Collector capture info (§6.7 B)', () => {
       captured: 1,
       total: null,
       truncated: true,
-      policy: 'sampled-200ms',
+      policy: 'per-flush',
       dropped: [
         { reason: 'runtime-count', count: 3 },
         { reason: 'runtime-bytes', count: 1 },
@@ -790,7 +790,7 @@ describe('Collector capture info (§6.7 B)', () => {
       captured: 0,
       total: null,
       truncated: false,
-      policy: 'sampled-200ms',
+      policy: 'per-flush',
     })
   })
 
@@ -872,7 +872,7 @@ describe('Collector reactive summary pulls (§6.7 I)', () => {
       rows: [{ componentId: 4, changes: 5, renders: 2 }],
       other: { components: 49999, nodes: 120000 },
       truncated: true,
-      policy: 'sampled-200ms',
+      policy: 'per-flush',
       coverage: 'component-init',
       capabilities: { valueInspection: false, signalHistory: false, writeCause: false },
     })

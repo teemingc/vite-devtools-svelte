@@ -1194,7 +1194,7 @@ async function tier2(p, getSrv, restart, app) {
       20_000,
     )
     // ReactiveSummary (types.ts); rows are active instances (top K), other = the rest (runtime.ts)
-    if (s.policy !== 'sampled-200ms' || s.coverage !== 'component-init')
+    if (s.policy !== 'per-flush' || s.coverage !== 'component-init')
       throw new Error(`policy ${s.policy} / coverage ${s.coverage}`)
     if ((s.components?.total ?? null) === null || (s.other ?? null) === null)
       throw new Error('total or other unknown (null)')
