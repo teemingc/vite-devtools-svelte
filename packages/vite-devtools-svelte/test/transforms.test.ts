@@ -82,6 +82,13 @@ describe('trackingPlugin transform', () => {
   it.each([
     ['server-side rendering', [MODULE_CODE, '/app/a.svelte.ts', { ssr: true }], {}, {}],
     ['node_modules', [MODULE_CODE, '/app/node_modules/lib/a.svelte.js'], {}, {}],
+    // compiled for the server without the ssr flag (e.g. a custom environment)
+    [
+      'a server-compiled module',
+      ["import * as $ from 'svelte/internal/server'", '/app/a.svelte.ts'],
+      {},
+      {},
+    ],
     ['vite build', [MODULE_CODE, '/app/a.svelte.ts'], {}, { command: 'build' }],
     ['a plain module', ['export const x = 1', '/app/src/a.ts'], {}, {}],
     // components import the hooks through the compiler (experimental.devtools)

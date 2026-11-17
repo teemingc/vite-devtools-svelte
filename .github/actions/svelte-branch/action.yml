@@ -10,7 +10,7 @@ runs:
       shell: bash
       env:
         # emit-dev-events; bump together with the local checkout
-        SVELTE_SHA: cd97d7c60218b6d1b90e8da045c7f6fb48756561
+        SVELTE_SHA: 577c8973239b38ed8a33397970ec10220a5a7ec1
         # the svelte repo's packageManager
         SVELTE_PNPM: pnpm@10.33.4
       run: |
