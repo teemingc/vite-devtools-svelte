@@ -171,7 +171,6 @@ export interface ReactiveGraphResult extends ReactiveGraph {
 /** `get-reactive-summary` arguments (§6.7 I). */
 export interface ReactiveSummaryRequest {
   topK?: number
-  windowMs?: number
 }
 
 /** One component instance in the overview, from runtime counters over all instances. */
@@ -186,20 +185,28 @@ export interface ReactiveSummaryRow {
   kind?: 'module'
   /** Tracked nodes registered for this instance, by type. */
   nodes: { state: number; derived: number; effect: number }
-  /** State changes in the window (≤ 1 per node per Svelte flush); not a rate. */
+  /**
+   * State changes since the instance was registered (≤ 1 per node per Svelte
+   * flush), observed only while a DevTools client or MCP lease is active.
+   */
   changes: number
-  /** Renders in the window. */
+  /** Renders since the instance was registered. */
   renders: number
   renderMs: number
+  /** When the last change or render was recorded (ms since epoch); `null` = unknown. */
+  lastActiveAt: number | null
 }
 
 /**
- * Whole-app overview without capturing the graph (§6.7 I/J). `rows` + `other`
- * add up to `components` / the registered node counts; `null` = unknown.
+ * Whole-app overview without capturing the graph (§6.7 I/J): the live
+ * instances with their totals since each was registered (a destroyed instance
+ * leaves with its counters). `rows` + `other` add up to `components` / the
+ * registered node counts; `null` = unknown.
  */
 export interface ReactiveSummary {
   epoch: string | null
-  window: { ms: number; since: number; until: number; sampledActiveMs: number }
+  /** When the page computed this answer (ms since epoch); `null` for an empty fallback. */
+  computedAt: number | null
   policy: 'per-flush'
   /**
    * Tracked: signals created during a component's init (and its later block
@@ -208,6 +215,7 @@ export interface ReactiveSummary {
    * created elsewhere (e.g. in an event handler) are not tracked.
    */
   coverage: 'component-init'
+  /** `withActivity`: live instances with any change or render since they were registered. */
   components: { total: number | null; withActivity: number }
   rows: ReactiveSummaryRow[]
   other: { components: number; nodes: number } | null

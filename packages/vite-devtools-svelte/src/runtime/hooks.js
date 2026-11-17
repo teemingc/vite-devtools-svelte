@@ -17,7 +17,6 @@ import {
   listen,
   location,
   parentComponent,
-  parentEffect,
   reactions,
   signalValue,
   snapshot,
@@ -100,7 +99,6 @@ if (dt) {
     deps,
     reactions,
     kind,
-    isDestroyed,
     componentOf,
     children,
     snapshot,
@@ -244,12 +242,15 @@ if (dt) {
       if (k !== 'effect' && k !== 'effectPre') return
       const scope = scopeOf(componentOf(effect), loc)
       if (scope === null) return
-      const nodeId = dt.trackUserEffect(
-        k === 'effect' ? 'effect' : 'effect_pre',
-        scope,
-        parentEffect(effect),
-      )
+      const nodeId = dt.trackUserEffect(k === 'effect' ? 'effect' : 'effect_pre', scope)
       dt.bindEffect(nodeId, effect)
+    },
+
+    // Also reported for an effect Svelte drops from the tree right after its
+    // first run (not destroyed: its only child, if any, takes its place).
+    effectDestroyed(effect) {
+      if (isDestroyed(effect)) dt.effectDestroyed(effect)
+      else dt.effectElided(effect, children(effect)[0] ?? null)
     },
 
     // Render profiling: Svelte 5 has no virtual DOM, every dynamic part of a

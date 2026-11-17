@@ -2,7 +2,7 @@
 // with request correlation (A, M1), bounded per-flush state observation (D), timeline
 // throttle + disclosure (C), and the overview aggregate (I/J).
 // Deterministic: fake timers and an injected clock, no wall-clock ratios.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   countVisits,
@@ -179,7 +179,7 @@ describe('§6.7 D: bounded per-flush state observation', () => {
     expect(h.dt._written.size).toBe(0)
   })
 
-  it('removal keeps the sweep index consistent (swap with last) and drops pending work', () => {
+  it('unmount drops the pending work of the removed nodes', () => {
     const h = createRuntime()
     const list = mountList(h, 50, 2)
     const poll = pollFn(h)
@@ -187,15 +187,14 @@ describe('§6.7 D: bounded per-flush state observation', () => {
     const doomed = list.ids.slice(10, 30)
     for (const s of list.signals.slice(0, 150).filter(x => x.deps === null)) write(h, s, -1)
     for (const id of doomed) h.dt.unmount(id)
-    const ids = h.dt._sweepIds as string[]
-    expect(ids.length).toBe(h.dt._reactiveNodes.size)
-    ids.forEach((id, i) => expect(h.dt._sweepIndex.get(id)).toBe(i))
-    expect(new Set(ids).size).toBe(ids.length)
+    expect(h.dt._reactiveNodes.size).toBe(30 * 4)
     const gone = new Set(doomed.map(String))
     const ofDoomed = (nodeId: string) => gone.has(nodeId.split(':')[0]!)
+    expect([...h.dt._reactiveNodes.keys()].filter(ofDoomed)).toEqual([])
     expect([...h.dt._written].filter(ofDoomed)).toEqual([])
     expect([...h.dt._unseeded].filter(ofDoomed)).toEqual([])
-    poll() // no throw, sweep cursor wraps
+    poll()
+    expect(h.dt._written.size).toBe(0)
   })
 
   it('a write with no active consumer schedules nothing', () => {
@@ -465,7 +464,7 @@ describe('§6.7 C: timeline throttle + disclosure', () => {
 })
 
 describe('§6.7 I/J: reactive summary', () => {
-  it('O(1) counters: rows + other = total, ranked by sampled changes, top-K', () => {
+  it('O(1) counters: rows + other = total, ranked by observed changes, top-K', () => {
     let now = 10_000
     const h = createRuntime({ clock: () => now })
     const list = mountList(h, 20, 1) // per row: 1 state, 1 derived, 1 effect
@@ -479,11 +478,13 @@ describe('§6.7 I/J: reactive summary', () => {
       write(h, states[3], states[3].v + 100)
       poll()
     }
-    const s = h.dt.getReactiveSummary({ topK: 1, windowMs: 10_000 })
+    const before = Date.now()
+    const s = h.dt.getReactiveSummary({ topK: 1 })
     expect(s.policy).toBe('per-flush')
     expect(s.coverage).toBe('component-init')
     expect(s.rows).toHaveLength(1)
     expect(s.rows[0].componentId).toBe(list.ids[3])
+    expect(s.rows[0].changes).toBe(3)
     expect(s.rows[0].nodes).toEqual({ state: 1, derived: 1, effect: 1 })
     expect(s.truncated).toBe(true)
     expect(s.components.total).toBe(21)
@@ -496,7 +497,65 @@ describe('§6.7 I/J: reactive summary', () => {
       signalHistory: false,
       writeCause: false,
     })
-    expect(s.window.sampledActiveMs).toBeGreaterThan(0)
+    expect(s.rows[0].lastActiveAt).toBeLessThanOrEqual(before)
+    expect(s.computedAt).toBeGreaterThanOrEqual(before)
+    expect(s.components.withActivity).toBe(2)
+    expect(s).not.toHaveProperty('window')
+  })
+
+  it('ties rank by renders, then render ms, then the most recently active', () => {
+    const h = createRuntime()
+    const list = mountList(h, 4, 1)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(1000)
+      h.dt.recordRender(list.ids[0])
+      h.dt.recordRenderTime(list.ids[0], 1)
+      vi.setSystemTime(2000)
+      h.dt.recordRender(list.ids[1])
+      h.dt.recordRenderTime(list.ids[1], 1)
+      h.dt.recordRender(list.ids[2])
+      h.dt.recordRenderTime(list.ids[2], 5)
+      h.dt.recordRender(list.ids[3])
+      h.dt.recordRender(list.ids[3])
+    } finally {
+      vi.useRealTimers()
+    }
+    const rows = h.dt.getReactiveSummary({}).rows
+    expect(rows.map((r: any) => r.componentId)).toEqual([3, 2, 1, 0].map(i => list.ids[i]))
+    expect(rows.map((r: any) => r.lastActiveAt)).toEqual([2000, 2000, 2000, 1000])
+  })
+
+  it('totals accumulate since mount (no time window) and leave with a destroyed instance', () => {
+    let now = 0
+    const h = createRuntime({ clock: () => now })
+    const list = mountList(h, 3, 1)
+    const poll = pollFn(h)
+    poll()
+    const state = list.signals.filter((s: any) => s.deps === null)[1]
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      for (let t = 0; t < 4; t++) {
+        // 15 s apart: far beyond any former 10 s window
+        now += 15_000
+        vi.setSystemTime(now)
+        write(h, state, state.v + 1)
+        poll()
+        h.dt.recordRender(list.ids[1])
+      }
+      now += 60_000
+      vi.setSystemTime(now)
+      const row = h.dt.getReactiveSummary({}).rows.find((r: any) => r.componentId === list.ids[1])
+      expect(row).toMatchObject({ changes: 4, renders: 4, lastActiveAt: 60_000 })
+      expect(h.dt.getReactiveSummary({}).components.withActivity).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+    h.dt.unmount(list.ids[1])
+    const s = h.dt.getReactiveSummary({})
+    expect(s.rows).toEqual([])
+    expect(s.components).toEqual({ total: 3, withActivity: 0 })
+    expect(h.dt._activity.has(list.ids[1])).toBe(false)
   })
 
   it('counts follow unmount, re-tracking a signal, and same-name signals', () => {
@@ -526,6 +585,112 @@ describe('§6.7 I/J: reactive summary', () => {
       .map(s => s.data as any)
     expect(replies).toHaveLength(1)
     expect(replies[0]).toMatchObject({ requestId: 2, epoch: h.dt._epoch })
+  })
+})
+
+// an {#each} row: its branch effect owns the row's signals and $effect
+function eachRow(h: Harness, id: number, branch: object) {
+  const count: any = { v: 1, deps: null }
+  const doubled: any = { v: 2, deps: [count] }
+  h.dt.trackState(count, 'count', id, branch)
+  h.dt.trackDerived(doubled, 'doubled', id, branch)
+  const effect = { deps: [doubled], fn() {} }
+  h.dt.bindEffect(h.dt.trackUserEffect('effect', id), effect)
+  return { count, doubled, effect }
+}
+
+describe('effectDestroyed: nodes leave with the effect they belong to', () => {
+  it('removes the owned nodes and the bound $effect at once, with their bookkeeping', () => {
+    const h = createRuntime()
+    const id = h.dt.register('/app/src/lib/List.svelte')
+    h.dt.registered(id)
+    const kept = { name: 'row 1' }
+    const doomed = { name: 'row 2' }
+    eachRow(h, id, kept)
+    const row = eachRow(h, id, doomed)
+    pollFn(h)()
+    write(h, row.count, 5) // pending observation of a node about to go
+    expect(h.dt._nodeTotals).toEqual({ state: 2, derived: 2, effect: 2 })
+    h.dt.effectDestroyed(row.effect)
+    expect(h.dt._nodeTotals).toEqual({ state: 2, derived: 2, effect: 1 })
+    h.dt.effectDestroyed(doomed)
+    expect(h.dt._nodeTotals).toEqual({ state: 1, derived: 1, effect: 1 })
+    expect(h.dt._nodeCounts.get(id)).toEqual({ state: 1, derived: 1, effect: 1 })
+    expect([...h.dt._reactiveNodes.keys()]).toEqual([
+      `${id}:count`,
+      `${id}:doubled`,
+      `${id}:effect_1`,
+    ])
+    expect([...h.dt._nodesByComponent.get(id)]).toEqual([...h.dt._reactiveNodes.keys()])
+    expect(h.dt._written.size).toBe(0)
+    expect(h.dt._stateSnapshots.has(`${id}:count#2`)).toBe(false)
+    expect(h.dt._idBySignal.has(row.count)).toBe(false)
+    expect(h.dt._idBySignal.has(row.effect)).toBe(false)
+    expect(h.dt._nodesByOwner.has(doomed)).toBe(false)
+    // no sweep pass ran: nothing observed the removal lazily
+    expect(
+      h.dt
+        .getReactiveGraph(id)
+        .nodes.map((n: any) => n.name)
+        .toSorted(),
+    ).toEqual(['count', 'doubled', 'effect_1'])
+  })
+
+  it('an unseeded node removed by its effect is pushed as seed progress', () => {
+    const h = createRuntime()
+    const id = h.dt.register('/app/src/lib/List.svelte')
+    h.dt.registered(id)
+    pollFn(h)()
+    h.flushTimers()
+    const branch = {}
+    h.dt.trackState({ v: 1 }, 'late', id, branch)
+    // the server has seen it pending
+    h.emit('svelte-devtools:request-state-timeline')
+    expect(timelineMsgs(h).at(-1).baseline).toEqual({ complete: false, pendingNodes: 1 })
+    expect(h.pendingDelays()).toEqual([0]) // only the scheduled seed
+    h.sent.length = 0
+    h.dt.effectDestroyed(branch)
+    expect(h.pendingDelays()).toEqual([0, 300])
+    h.flushTimers()
+    expect(timelineMsgs(h).map(m => m.baseline)).toEqual([{ complete: true, pendingNodes: 0 }])
+  })
+
+  it('a node unmounted first is not removed twice; a reused id survives its old owner', () => {
+    const h = createRuntime()
+    const id = h.dt.register('/app/src/lib/List.svelte')
+    h.dt.registered(id)
+    const oldBranch = {}
+    const sig: any = { v: 1 }
+    h.dt.trackState(sig, 'x', id, oldBranch)
+    // the old signal is collected; a new signal takes the free name under another effect
+    h.dt._reactiveNodes.get(`${id}:x`).signal = { deref() {} } // a collected WeakRef
+    const newBranch = {}
+    expect(h.dt.trackState({ v: 2 }, 'x', id, newBranch)).toBe(`${id}:x`)
+    h.dt.effectDestroyed(oldBranch)
+    expect(h.dt._reactiveNodes.has(`${id}:x`)).toBe(true)
+    h.dt.effectDestroyed(newBranch)
+    expect(h.dt._reactiveNodes.has(`${id}:x`)).toBe(false)
+    expect(h.dt._nodeTotals).toEqual({ state: 0, derived: 0, effect: 0 })
+  })
+
+  it('an elided effect hands its nodes to the child that replaces it', () => {
+    const h = createRuntime()
+    const id = h.dt.register('/app/src/lib/List.svelte')
+    h.dt.registered(id)
+    const elided = {}
+    const child = {}
+    const orphan = {}
+    h.dt.trackState({ v: 1 }, 'a', id, elided)
+    h.dt.trackState({ v: 1 }, 'b', id, orphan)
+    h.dt.effectElided(elided, child)
+    h.dt.effectElided(orphan, null)
+    expect(h.dt._reactiveNodes.size).toBe(2)
+    h.dt.effectDestroyed(elided) // never happens after elision; harmless
+    expect(h.dt._reactiveNodes.size).toBe(2)
+    h.dt.effectDestroyed(child)
+    expect([...h.dt._reactiveNodes.keys()]).toEqual([`${id}:b`])
+    h.dt.unmount(id)
+    expect(h.dt._reactiveNodes.size).toBe(0)
   })
 })
 

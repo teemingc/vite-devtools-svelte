@@ -17,7 +17,7 @@ import { Collector } from './server/collector.js'
 import { captureCompilerWarnings } from './server/compiler-warnings.js'
 import { createSvelteDevframe, DEVFRAME_BASE } from './server/devframe.js'
 import type { SvelteDevtoolsHost } from './server/devframe.js'
-import { LOAD_RECORDER, profileLoad } from './server/load-profile.js'
+import { LOAD_RECORDER, loadProfileOf, profileLoad } from './server/load-profile.js'
 import { mountStandalone, urlHost } from './server/mount.js'
 import { sveltekitTemplateInjector } from './server/template-injector.js'
 import type { LoadProfile } from './types.js'
@@ -313,14 +313,7 @@ export function svelteDevtools(options: SvelteDevtoolsOptions = {}): Plugin[] {
         duration: number,
         dataSize: number,
       ) => {
-        collector.recordLoadProfile({
-          route,
-          file,
-          type,
-          duration: Math.round(duration * 100) / 100,
-          dataSize,
-          timestamp: Date.now(),
-        })
+        collector.recordLoadProfile(loadProfileOf({ route, file, type, duration, dataSize }))
       }
     },
 

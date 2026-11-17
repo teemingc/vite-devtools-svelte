@@ -16,8 +16,8 @@ const { createStore, connectHot } = (await import(RUNTIME_URL)) as RuntimeModule
 /**
  * The readers hooks.js gives the runtime (svelte/internal/devtools), over the
  * plain objects these tests use as signals and effects: `v` value (a symbol
- * = uninitialized), `deps` / `reactions` arrays, `fn` (an effect; `null` once
- * destroyed), `ctx`, `first` / `next` children. A derived is an object with a
+ * = uninitialized), `deps` / `reactions` arrays, `fn` (an effect), `ctx`,
+ * `first` / `next` children. A derived is an object with a
  * `deps` array and no `fn`.
  */
 export const fieldApi = {
@@ -26,7 +26,6 @@ export const fieldApi = {
   deps: (r: any): unknown[] => r.deps ?? [],
   reactions: (s: any): unknown[] => s.reactions ?? [],
   kind: (x: any) => ('fn' in x ? 'effect' : Array.isArray(x.deps) ? 'derived' : 'state'),
-  isDestroyed: (e: any) => e.fn === null,
   componentOf: (e: any) => e.ctx ?? null,
   children: (e: any) => {
     const out: unknown[] = []
@@ -202,7 +201,7 @@ export function mountList(h: Harness, n: number, statesPer = 2) {
     const derived = { v: i * 2, deps: [signals.at(-1)] }
     signals.push(derived)
     dt.trackDerived(derived, 'd', id)
-    dt.bindEffect(dt.trackUserEffect('effect', id, null), { deps: [derived], fn() {} })
+    dt.bindEffect(dt.trackUserEffect('effect', id), { deps: [derived], fn() {} })
     dt.endInit(id)
     dt.registered(id)
     ids.push(id)

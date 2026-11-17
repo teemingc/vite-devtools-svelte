@@ -1186,7 +1186,7 @@ async function tier2(p, getSrv, restart, app) {
   let epochBefore = null
   await step('T2 get_reactive_summary: policy/coverage, rows + other = total', 25_000, async () => {
     const s = await poll(
-      () => tool(getSrv(), 'get_reactive_summary', { windowMs: 10_000 }),
+      () => tool(getSrv(), 'get_reactive_summary'),
       x => x && x.stale !== true && Array.isArray(x.rows),
       20_000,
     )
@@ -1269,11 +1269,11 @@ async function tier2(p, getSrv, restart, app) {
         `expected exactly 1 ${sc.state} entry ${JSON.stringify(sc.from)}->${JSON.stringify(sc.to)}; got ${brief(changes)}`,
       )
     // The collector answers a repeated summary request from its 1 s cache
-    // (PULL_FRESHNESS): one computed before the click (178, 194: sampledActiveMs
-    // 200, withActivity 0). Use only an answer computed after the click.
+    // (PULL_FRESHNESS): one computed before the click (178, 194: withActivity 0).
+    // Use only an answer computed after the click.
     const summary = await poll(
-      () => tool(getSrv(), 'get_reactive_summary', { windowMs: 10_000 }),
-      x => x && x.stale !== true && (x.window?.until ?? 0) >= clickedAt,
+      () => tool(getSrv(), 'get_reactive_summary'),
+      x => x && x.stale !== true && (x.computedAt ?? 0) >= clickedAt,
       5_000,
     ).catch(e => {
       throw new Error(`no summary computed after the click (${e.message})`)
@@ -1285,7 +1285,7 @@ async function tier2(p, getSrv, restart, app) {
           stale: summary?.stale ?? false,
           staleReason: summary?.staleReason ?? null,
           epoch: summary?.epoch ?? null,
-          window: summary?.window ?? null,
+          computedAt: summary?.computedAt ?? null,
           components: summary?.components ?? null,
           rows: (summary?.rows ?? [])
             .slice(0, 10)

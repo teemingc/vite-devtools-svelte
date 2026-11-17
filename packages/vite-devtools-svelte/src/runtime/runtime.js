@@ -12,31 +12,6 @@ function __hash(str) {
   return (h >>> 0).toString(36)
 }
 
-// Dense id lists (an array plus id -> position) for cursor-driven sweeps.
-function __denseAdd(ids, index, id) {
-  if (index.has(id)) return
-  index.set(id, ids.length)
-  ids.push(id)
-}
-
-// O(1): the last id takes the removed slot. If that slot is behind a sweep
-// cursor, the moved id is visited in the next sweep instead of this one.
-function __denseRemove(ids, index, id) {
-  const i = index.get(id)
-  if (i === undefined) return
-  const last = ids.pop()
-  index.delete(id)
-  if (i < ids.length) {
-    ids[i] = last
-    index.set(last, i)
-  }
-}
-
-// Ring slot (0..59) of a whole second in the activity buckets.
-function __slot(sec) {
-  return ((sec % 60) + 60) % 60
-}
-
 // String(value), or a placeholder when it cannot be converted (a
 // null-prototype object, a throwing toString).
 function __describe(value) {
@@ -142,17 +117,13 @@ export function createStore(env) {
     // componentId -> { effect, effect_pre } counters: effect names are
     // numbered per component, so instances of one file match
     _effectSeq: new Map(),
-    // Every tracked node id (dense array, swap-remove) for the incremental
-    // liveness sweep, and its cursor.
-    _sweepIds: [],
-    _sweepIndex: new Map(),
-    _sweepCursor: 0,
+    // owner effect -> Set<nodeId>: the nodes of signals created while that
+    // effect ran ({#each} items, effect runs), removed when it is destroyed.
+    _nodesByOwner: new WeakMap(),
     // $state nodes whose write was applied (markWritten, after Svelte's
     // flush of the batch) and not observed yet; observed in the next task.
     _written: new Set(),
     _observeTimer: null,
-    // since when a consumer watches (window.sampledActiveMs), or null
-    _activeSince: null,
     _lastSnapshotSize: new Map(),
     _timelineSeq: 0,
     _pushedSeq: 0,
@@ -166,12 +137,12 @@ export function createStore(env) {
     _valueTooLarge: 0,
 
     // Overview aggregate, O(1) per event: registered nodes per
-    // component and type (+ app totals), and per-component activity in a
-    // ring of 60 one-second buckets (sampled changes, renders, render ms,
-    // plus how long sampling ran in that second).
+    // component and type (+ app totals), and per live scope its activity
+    // since it was registered (observed changes, renders, render ms, last
+    // active time); a destroyed instance takes its counters with it.
     _nodeCounts: new Map(),
     _nodeTotals: { state: 0, derived: 0, effect: 0 },
-    _activity: [],
+    _activity: new Map(),
     _epoch: Math.random().toString(36).slice(2) + Date.now().toString(36),
 
     // Activity subscription
@@ -198,9 +169,9 @@ export function createStore(env) {
     _sentPendingNodes: null,
     _fpsGen: 0,
     // Readers of Svelte's objects (set by hooks.js from svelte/internal/devtools):
-    // signalValue, isUninitialized, deps, reactions, kind, isDestroyed,
-    // componentOf, children, snapshot, and sourceNode (the node a $state
-    // proxy's property / version signal belongs to, or null).
+    // signalValue, isUninitialized, deps, reactions, kind, componentOf,
+    // children, snapshot, and sourceNode (the node a $state proxy's
+    // property / version signal belongs to, or null).
     _api: null,
     // the HMR channel (connectHot, by the first hooks.js copy that has one)
     _hot: null,
@@ -265,6 +236,7 @@ export function createStore(env) {
       // never sent, so it cancels out.
       if (this._active && !this._pendingAdded.delete(id)) this._pendingRemoved.add(id)
       this._cleanupReactiveNodes(id)
+      this._activity.delete(id)
       this._effectSeq.delete(id)
       this._nameSeq.delete(id)
       this._instances.delete(id)
@@ -289,21 +261,17 @@ export function createStore(env) {
       }
       const signal = entry?.signal?.deref()
       if (signal && this._idBySignal.get(signal) === nodeId) this._idBySignal.delete(signal)
+      const owner = entry?.owner?.deref()
+      if (owner) this._nodesByOwner.get(owner)?.delete(nodeId)
       const proxy = this._reactiveProxies.get(nodeId)?.deref()
       if (proxy && this._idByProxy.get(proxy) === nodeId) this._idByProxy.delete(proxy)
       this._unseeded.delete(nodeId)
       this._written.delete(nodeId)
-      this._sweepRemove(nodeId)
       this._reactiveNodes.delete(nodeId)
       this._reactiveProxies.delete(nodeId)
       this._stateSnapshots.delete(nodeId)
       this._stateSnapshotStrs.delete(nodeId)
       this._lastSnapshotSize.delete(nodeId)
-    },
-
-    // A component instance or a module scope that is still live.
-    _scopeLive(id) {
-      return this._instances.has(id) || this._modules.has(id)
     },
 
     _scopeFile(id) {
@@ -323,46 +291,57 @@ export function createStore(env) {
       return id
     },
 
-    // A node is live while its signal is reachable, its component is mounted,
-    // and the effect it was created in (an {#each} item, an effect run) has
-    // not been destroyed. Returns the signal or null.
+    // Nodes leave the store when their component unmounts or the effect
+    // they belong to is destroyed (effectDestroyed); a signal can still be
+    // collected first. Returns the signal, or null (and forgets the node).
     _liveSignal(nodeId) {
       const entry = this._reactiveNodes.get(nodeId)
       if (!entry) return null
       const signal = entry.signal.deref()
-      if (signal && this._scopeLive(entry.meta.componentId) && this._ownerAlive(entry)) {
-        if (!entry.effect) return signal
-        if (!this._api.isDestroyed(signal)) return signal
-      }
+      if (signal) return signal
       this._forgetNode(nodeId)
       return null
     },
 
-    _ownerAlive(entry) {
-      if (!entry.owner) return true
-      const owner = entry.owner.deref()
-      return !!owner && !this._api.isDestroyed(owner)
-    },
-
-    _sweepAdd(nodeId) {
-      __denseAdd(this._sweepIds, this._sweepIndex, nodeId)
-    },
-
-    _sweepRemove(nodeId) {
-      __denseRemove(this._sweepIds, this._sweepIndex, nodeId)
-    },
-
-    // Liveness of up to `max` nodes, continuing from a cursor (each poll
-    // tick): nodes of destroyed {#each} items / effect runs leave the counts
-    // and the graph without waiting for a graph request or GC.
-    _sweepNodes(max) {
-      const ids = this._sweepIds
-      for (let n = 0; n < max && ids.length > 0; n++) {
-        if (this._sweepCursor >= ids.length) this._sweepCursor = 0
-        const nodeId = ids[this._sweepCursor]
-        // a forgotten node's slot is refilled by the last id: re-check it
-        if (this._liveSignal(nodeId)) this._sweepCursor++
+    // Svelte destroyed `effect` (hooks.js): the $effect node bound to it and
+    // the nodes of signals created while it ran leave the store now.
+    effectDestroyed(effect) {
+      const bound = this._idBySignal.get(effect)
+      if (bound !== undefined) this._forgetNode(bound)
+      const owned = this._nodesByOwner.get(effect)
+      if (owned !== undefined) {
+        this._nodesByOwner.delete(effect)
+        for (const nodeId of owned) this._forgetNode(nodeId)
       }
+      // seed progress changed: pushed like an observation pass would
+      if (this._sentPendingNodes !== this._unseeded.size) this._scheduleTimelineUpdate()
+    },
+
+    // Svelte dropped `effect` from the tree without destroying it; its only
+    // child (or nothing) takes its place, so the nodes it owns move there.
+    effectElided(effect, replacement) {
+      const owned = this._nodesByOwner.get(effect)
+      if (owned === undefined) return
+      this._nodesByOwner.delete(effect)
+      if (replacement === null) {
+        for (const nodeId of owned) this._reactiveNodes.get(nodeId).owner = null
+        return
+      }
+      const ref = new WeakRef(replacement)
+      const target = this._ownedBy(replacement)
+      for (const nodeId of owned) {
+        this._reactiveNodes.get(nodeId).owner = ref
+        target.add(nodeId)
+      }
+    },
+
+    _ownedBy(effect) {
+      let set = this._nodesByOwner.get(effect)
+      if (set === undefined) {
+        set = new Set()
+        this._nodesByOwner.set(effect, set)
+      }
+      return set
     },
 
     // Unique node id for a signal: componentId:name, or componentId:name#k
@@ -388,17 +367,19 @@ export function createStore(env) {
       return id
     },
 
-    _registerNode(nodeId, componentId, type, name, signalRef, owner, extra) {
+    // `owner`: the effect the signal was created in, or null (module code).
+    _registerNode(nodeId, componentId, type, name, signalRef, owner) {
       this._trackNodeCount(nodeId, componentId, type)
+      const prev = this._reactiveNodes.get(nodeId)?.owner?.deref()
+      if (prev) this._nodesByOwner.get(prev)?.delete(nodeId)
       const entry = {
         signal: signalRef,
         owner: owner ? new WeakRef(owner) : null,
         meta: { id: nodeId, type, name, componentId, componentFile: this._scopeFile(componentId) },
       }
-      if (extra) Object.assign(entry, extra)
       this._reactiveNodes.set(nodeId, entry)
       this._indexNode(nodeId, componentId)
-      this._sweepAdd(nodeId)
+      if (owner) this._ownedBy(owner).add(nodeId)
       return entry
     },
 
@@ -448,23 +429,15 @@ export function createStore(env) {
       if (c.state + c.derived + c.effect <= 0) this._nodeCounts.delete(componentId)
     },
 
-    _bucket() {
-      const sec = Math.floor(performance.now() / 1000)
-      let b = this._activity[__slot(sec)]
-      if (!b || b.second !== sec) {
-        b = { second: sec, rows: new Map() }
-        this._activity[__slot(sec)] = b
-      }
-      return b
-    },
-
+    // Activity of a live scope since it was registered; touching it marks
+    // the scope active now.
     _activityRow(componentId) {
-      const rows = this._bucket().rows
-      let r = rows.get(componentId)
+      let r = this._activity.get(componentId)
       if (!r) {
-        r = { changes: 0, renders: 0, renderMs: 0 }
-        rows.set(componentId, r)
+        r = { changes: 0, renders: 0, renderMs: 0, lastActiveAt: 0 }
+        this._activity.set(componentId, r)
       }
+      r.lastActiveAt = Date.now()
       return r
     },
 
@@ -670,8 +643,8 @@ export function createStore(env) {
     // --- Reactive graph tracking ---
 
     // `owner` (optional): the effect active when the signal was created; the
-    // node dies with it (an {#each} item's {@const}, a class instance created
-    // in an effect run).
+    // node is removed when it is destroyed (an {#each} item's {@const}, a
+    // class instance created in an effect run).
     trackState(signal, name, componentId, owner) {
       const nodeId = this._nodeIdFor(signal, this._idBySignal, componentId, name)
       this._registerNode(nodeId, componentId, 'state', name, new WeakRef(signal), owner)
@@ -701,10 +674,11 @@ export function createStore(env) {
       return nodeId
     },
 
-    // A $effect / $effect.pre node; bindEffect() attaches the effect object.
+    // A $effect / $effect.pre node; bindEffect() attaches the effect object
+    // (the node is removed when that effect is destroyed).
     // kind: 'effect' | 'effect_pre'; names are effect_1, effect_pre_1, ... per
     // component, in creation order.
-    trackUserEffect(kind, componentId, owner) {
+    trackUserEffect(kind, componentId) {
       let seq = this._effectSeq.get(componentId)
       if (!seq) {
         seq = { effect: 0, effect_pre: 0 }
@@ -713,7 +687,7 @@ export function createStore(env) {
       const name = kind + '_' + ++seq[kind]
       const nodeId = componentId + ':' + name
       const placeholder = { v: undefined, _isEffect: true }
-      this._registerNode(nodeId, componentId, 'effect', name, { deref: () => placeholder }, owner)
+      this._registerNode(nodeId, componentId, 'effect', name, { deref: () => placeholder }, null)
       return nodeId
     },
 
@@ -721,7 +695,6 @@ export function createStore(env) {
       const entry = nodeId !== null && this._reactiveNodes.get(nodeId)
       if (!entry || !effect || typeof effect !== 'object') return
       entry.signal = new WeakRef(effect)
-      entry.effect = true
       this._idBySignal.set(effect, nodeId)
     },
 
@@ -821,7 +794,7 @@ export function createStore(env) {
       const maxNodes = this._graphCap(caps?.maxNodes, 5000)
       const maxEdges = this._graphCap(caps?.maxEdges, 20000)
       const live = new Map()
-      // Live signal of a tracked node, or null (forgets dead / unmounted nodes).
+      // Live signal of a tracked node, or null (forgets collected nodes).
       const liveSignal = nodeId => {
         if (live.has(nodeId)) return live.get(nodeId)
         const signal = this._liveSignal(nodeId)
@@ -1042,38 +1015,18 @@ export function createStore(env) {
       this._send('svelte-devtools:reactive-graph', graph)
     },
 
-    // Overview aggregate. Built from the activity buckets of the
-    // window (whole seconds: the current partial second plus the previous
-    // ones, ceil(windowMs / 1000) buckets) — cost O(components active in the
-    // window), no graph, no node scan. Rows rank by sampled changes, then
-    // renders, then render ms; rows + other = total (components and nodes).
+    // Overview aggregate over the live scopes: each one's activity since it
+    // was registered, cost O(scopes with activity), no graph, no node scan.
+    // Rows rank by observed changes, then renders, then render ms, then the
+    // most recently active; rows + other = total (components and nodes).
     getReactiveSummary(opts) {
-      const o = opts ?? {}
-      const topK = __clampInt(o.topK, 1, 200, 50)
-      const windowMs = __clampInt(o.windowMs, 1000, 60000, 10000)
-      const nowSec = Math.floor(performance.now() / 1000)
-      const agg = new Map()
-      for (let k = 0; k < Math.ceil(windowMs / 1000); k++) {
-        const sec = nowSec - k
-        const b = this._activity[__slot(sec)]
-        if (!b || b.second !== sec) continue
-        for (const [cid, r] of b.rows) {
-          if (!this._scopeLive(cid)) continue
-          let a = agg.get(cid)
-          if (!a) {
-            a = { changes: 0, renders: 0, renderMs: 0 }
-            agg.set(cid, a)
-          }
-          a.changes += r.changes
-          a.renders += r.renders
-          a.renderMs += r.renderMs
-        }
-      }
-      const ranked = [...agg].toSorted(
+      const topK = __clampInt(opts?.topK, 1, 200, 50)
+      const ranked = [...this._activity].toSorted(
         (x, y) =>
           y[1].changes - x[1].changes ||
           y[1].renders - x[1].renders ||
           y[1].renderMs - x[1].renderMs ||
+          y[1].lastActiveAt - x[1].lastActiveAt ||
           x[0] - y[0],
       )
       let rowNodes = 0
@@ -1087,6 +1040,7 @@ export function createStore(env) {
           changes: a.changes,
           renders: a.renders,
           renderMs: Math.round(a.renderMs * 1000) / 1000,
+          lastActiveAt: a.lastActiveAt,
         }
         // module scope (shared .svelte.js state), not a component instance
         if (this._modules.has(cid)) row.kind = 'module'
@@ -1095,35 +1049,25 @@ export function createStore(env) {
       const t = this._nodeTotals
       // module scopes count as rows like components (rows + other = total)
       const scopes = this._instances.size + this._modules.size
-      const until = Date.now()
       return {
         epoch: this._epoch,
-        window: {
-          ms: windowMs,
-          since: until - windowMs,
-          until,
-          // how long changes were recorded in the window
-          sampledActiveMs:
-            this._activeSince === null
-              ? 0
-              : Math.min(windowMs, Math.round(performance.now() - this._activeSince)),
-        },
+        computedAt: Date.now(),
         policy: 'per-flush',
         coverage: 'component-init',
-        components: { total: scopes, withActivity: agg.size },
+        components: { total: scopes, withActivity: this._activity.size },
         rows,
         other: {
           components: scopes - rows.length,
           nodes: t.state + t.derived + t.effect - rowNodes,
         },
-        truncated: agg.size > topK,
+        truncated: this._activity.size > topK,
         capabilities: { valueInspection: false, signalHistory: false, writeCause: false },
         // Seed coverage: changes of pending nodes are not observable yet.
         baseline: this._baselineInfo(),
       }
     },
 
-    // Request { requestId?, epoch?, topK?, windowMs? } (same correlation as
+    // Request { requestId?, epoch?, topK? } (same correlation as
     // the graph).
     sendReactiveSummary(request) {
       const req = request ?? {}
@@ -1168,10 +1112,7 @@ export function createStore(env) {
 
     _observeStates() {
       const SEED_NODES = 4096
-      const SWEEP_NODES = 2048
       const BUDGET_MS = 2
-      // nodes of destroyed {#each} items / effect runs leave the counts
-      if (!this._baselining) this._sweepNodes(SWEEP_NODES)
       const start = performance.now()
       const spent = () => performance.now() - start > BUDGET_MS
       let seeds = 0
@@ -1196,10 +1137,6 @@ export function createStore(env) {
     _observe(nodeId) {
       this._written.delete(nodeId)
       const entry = this._reactiveNodes.get(nodeId)
-      if (!entry || !this._scopeLive(entry.meta.componentId)) {
-        this._forgetNode(nodeId)
-        return
-      }
       const signal = entry.signal.deref()
       const value = signal ? this._readStateValue(nodeId, signal) : __NO_VALUE
       if (value === __NO_VALUE) {
@@ -1307,7 +1244,7 @@ export function createStore(env) {
       this._entryInfo.set(change, { seq: ++this._timelineSeq, bytes })
       this._stateTimeline.push(change)
       this._timelineBytes += bytes
-      // sampled change count: independent of the ring
+      // observed change count: independent of the ring
       this._activityRow(entry.meta.componentId).changes++
       this._stateSnapshots.set(nodeId, newValue)
       // The ring (_trimTimeline) is applied in bulk, not with one splice per
@@ -1503,11 +1440,9 @@ export function createStore(env) {
       const resync = this._resync || !!data?.resync
       this._resync = false
       if (this._active && !wasActive) {
-        this._activeSince = performance.now()
         this._observeBaseline()
         this._scheduleObserve()
       }
-      if (!this._active) this._activeSince = null
       if (this._active && (!wasActive || resync)) {
         // Collector state may be stale or empty (first activation, resync, or a
         // reconnect to a possibly restarted server): resend everything once, in

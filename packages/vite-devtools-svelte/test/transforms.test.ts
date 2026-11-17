@@ -9,6 +9,7 @@ import { afterAll, afterEach, describe, it, expect, vi } from 'vitest'
 import { svelteDevtools } from '../src/plugin.js'
 import { HOOKS_MODULE_ID } from '../src/runtime/ids.js'
 import { injectModuleTracking, isSvelteModule } from '../src/runtime/transform.js'
+import { LOAD_PROFILE_EVENT, parseLoadReport } from '../src/server/load-profile.js'
 import { callHook, codeOf, resolvePlugins } from './helpers.js'
 
 const HOOKS_IMPORT = `import '${HOOKS_MODULE_ID}';`
@@ -127,6 +128,7 @@ afterEach(() => {
 })
 
 const PAGE = '/app/src/routes/blog/[slug]/+page.server.ts'
+const UNIVERSAL = '/app/src/routes/+page.ts'
 
 describe('loadProfilePlugin: profiled load functions', () => {
   // `result` is a module-level object so its identity can be checked
@@ -203,6 +205,49 @@ describe('loadProfilePlugin: profiled load functions', () => {
       '/app/src/routes/+page.ts',
     )
     expect(await mod.load()).toEqual({ ok: 1 })
+  })
+
+  it('in the browser (no recorder) sends the timing over the hot channel', async () => {
+    const send = vi.fn()
+    const hot = globalThis as { __fakeHot?: { send: typeof send } }
+    hot.__fakeHot = { send }
+    try {
+      const result = callHook(
+        loadProfile().transform,
+        'export const load = () => ({ ok: 1 })',
+        UNIVERSAL,
+      )
+      // a Node module has no `import.meta.hot`: stand in for Vite's
+      const file = path.join(tmpDir, `m${moduleSeq++}.mjs`)
+      fs.writeFileSync(file, codeOf(result).replace('import.meta.hot', 'globalThis.__fakeHot'))
+      const mod = await import(/* @vite-ignore */ pathToFileURL(file).href)
+      expect(await mod.load()).toEqual({ ok: 1 })
+      expect(send).toHaveBeenCalledOnce()
+      const [event, payload] = send.mock.calls[0]!
+      expect(event).toBe(LOAD_PROFILE_EVENT)
+      expect(parseLoadReport(payload)).toEqual({
+        route: '/',
+        file: UNIVERSAL,
+        type: 'universal',
+        duration: payload.duration,
+        dataSize: JSON.stringify({ ok: 1 }).length,
+      })
+    } finally {
+      delete hot.__fakeHot
+    }
+  })
+
+  it.each([
+    ['not an object', 'x'],
+    ['an unknown type', { route: '/', file: 'f', type: 'other', duration: 1, dataSize: 1 }],
+    [
+      'a negative duration',
+      { route: '/', file: 'f', type: 'universal', duration: -1, dataSize: 1 },
+    ],
+    ['a fractional size', { route: '/', file: 'f', type: 'universal', duration: 1, dataSize: 1.5 }],
+    ['a missing route', { file: 'f', type: 'universal', duration: 1, dataSize: 1 }],
+  ])('a browser report that is %s is dropped', (_, payload) => {
+    expect(parseLoadReport(payload)).toBeNull()
   })
 
   it('keeps the original line numbers of the module', () => {
