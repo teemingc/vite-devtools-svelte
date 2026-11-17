@@ -27,6 +27,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - uses: ./.github/actions/svelte-branch
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -70,6 +72,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - uses: ./.github/actions/svelte-branch
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -110,6 +114,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - uses: ./.github/actions/svelte-branch
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -139,6 +145,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - uses: ./.github/actions/svelte-branch
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -198,6 +206,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - uses: ./.github/actions/svelte-branch
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -286,6 +296,8 @@ jobs:
           node --version
           pnpm --version
 
+      - uses: ./.github/actions/svelte-branch
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -335,6 +347,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - uses: ./.github/actions/svelte-branch
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -377,6 +391,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - uses: ./.github/actions/svelte-branch
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -443,6 +459,8 @@ jobs:
 
       - name: Tool versions
         run: node --version && pnpm --version && pnpm changeset --version
+
+      - uses: ./.github/actions/svelte-branch
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
