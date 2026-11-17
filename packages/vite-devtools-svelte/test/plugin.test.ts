@@ -1,4 +1,5 @@
 import http from 'node:http'
+import path from 'node:path'
 
 import type { Plugin } from 'vite'
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
@@ -126,6 +127,13 @@ describe('experimental.devtools', () => {
       dev: true,
       experimental: { async: true, devtools: ['other/runtime', HOOKS_FILE] },
     })
+  })
+
+  it('lets the dev server serve the hooks file (linked or outside the workspace)', () => {
+    const resolved = resolvePlugins(svelteDevtools(), {
+      plugins: [{ name: 'vite-plugin-svelte:config', api: { options: {} } }],
+    })
+    expect(resolved.server.fs.allow).toEqual(['/test', path.dirname(HOOKS_FILE)])
   })
 
   it('is not added when building', () => {

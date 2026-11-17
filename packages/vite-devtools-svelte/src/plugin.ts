@@ -156,7 +156,13 @@ export function svelteDevtools(options: SvelteDevtoolsOptions = {}): Plugin[] {
       // Only while developing, and not inside Vitest (which runs `serve`).
       // vite-plugin-svelte resolved its options in its own `configResolved`
       // (order 'pre').
-      if (serving() && !process.env['VITEST']) addDevtoolsHooks(config.plugins)
+      if (serving() && !process.env['VITEST']) {
+        addDevtoolsHooks(config.plugins)
+        // Components import the hooks by path (/@fs/...). Installed by link
+        // or from outside the workspace, that path is not in fs.allow and
+        // the browser gets a 403 for every component.
+        config.server.fs.allow.push(path.dirname(HOOKS_FILE))
+      }
     },
 
     configureServer(devServer) {
